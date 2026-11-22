@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="id"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>ExBotz</title><link rel="manifest" href="manifest.json"><meta name="theme-color" content="#0b0b10">
+<link rel="icon" href="icon.svg">
+<style>
+:root{--bg:#0b0b10;--p:#14141c;--p2:#1c1c28;--b:#2a2a3a;--t:#e8e8f0;--m:#8a8aa0;--a:#8b5cf6}
+*{box-sizing:border-box}html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--t);font:15px/1.5 system-ui,sans-serif;display:flex;overflow:hidden}
+button,input,select,textarea{font:inherit;color:inherit}
+button{background:var(--p2);border:1px solid var(--b);border-radius:8px;padding:6px 10px;cursor:pointer}
+button:hover{border-color:var(--a)}button.pri{background:var(--a);border-color:var(--a)}
+#side{width:270px;background:var(--p);border-right:1px solid var(--b);display:flex;flex-direction:column;padding:10px;gap:8px;transition:transform .2s;z-index:5}
+#list{flex:1;overflow:auto;display:flex;flex-direction:column;gap:2px}
+.ci{display:flex;align-items:center;gap:4px;padding:8px;border-radius:8px;cursor:pointer}
+.ci:hover,.ci.on{background:var(--p2)}.ci span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ci button{padding:0 6px;border:0;background:none;color:var(--m)}
+#main{flex:1;display:flex;flex-direction:column;min-width:0}
+#top{display:flex;gap:8px;align-items:center;padding:10px;border-bottom:1px solid var(--b)}
+#top b{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#menu{display:none}
+#msgs{flex:1;overflow:auto;padding:16px 12px;display:flex;flex-direction:column;gap:14px}
+.m{max-width:min(760px,92%);padding:10px 14px;border-radius:16px;word-wrap:break-word;overflow-wrap:anywhere;animation:in .2s}
+@keyframes in{from{opacity:0;transform:translateY(6px)}}
+.m.user{align-self:flex-end;background:var(--a);border-bottom-right-radius:4px;white-space:pre-wrap}
+.m.assistant{align-self:flex-start;background:var(--p2);border-bottom-left-radius:4px}
+.m p{margin:.4em 0}.m pre{background:#07070b;border:1px solid var(--b);border-radius:8px;padding:10px;overflow:auto;position:relative}
+.m code{font-family:ui-monospace,monospace;font-size:13px}.m :not(pre)>code{background:#07070b;padding:1px 5px;border-radius:4px}
+.m a{color:#a78bfa}.acts{display:flex;gap:6px;margin-top:6px}.acts button{font-size:12px;padding:2px 8px;color:var(--m)}
+.fc{display:inline-flex;gap:6px;align-items:center;background:var(--p);border:1px solid var(--b);border-radius:8px;padding:4px 8px;margin:4px 4px 0 0;font-size:13px}
+.dots span{display:inline-block;width:6px;height:6px;margin:0 2px;background:var(--m);border-radius:50%;animation:b 1s infinite}
+.dots span:nth-child(2){animation-delay:.15s}.dots span:nth-child(3){animation-delay:.3s}@keyframes b{50%{opacity:.2}}
+#bar{padding:10px;border-top:1px solid var(--b);padding-bottom:max(10px,env(safe-area-inset-bottom))}
+#chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px}
+#row{display:flex;gap:8px;align-items:flex-end}
+#in{flex:1;background:var(--p2);border:1px solid var(--b);border-radius:12px;padding:10px;resize:none;max-height:160px;outline:none}
+#in:focus{border-color:var(--a)}
+dialog{background:var(--p);color:var(--t);border:1px solid var(--b);border-radius:12px;width:min(520px,94vw);max-height:85vh}
+dialog::backdrop{background:#000a}dialog label{display:block;margin:10px 0 4px;color:var(--m);font-size:13px}
+dialog input,dialog select{width:100%;background:var(--p2);border:1px solid var(--b);border-radius:8px;padding:8px}
+dialog pre{white-space:pre-wrap;background:#07070b;padding:10px;border-radius:8px;overflow:auto;max-height:55vh}
+@media(max-width:760px){#side{position:fixed;inset:0 auto 0 0;transform:translateX(-100%)}#side.open{transform:none}#menu{display:block}}
+</style></head><body>
+<aside id="side"><button class="pri" id="new">+ Chat baru</button><div id="list"></div>
+<button id="files">📁 File percakapan</button><button id="set">⚙️ Pengaturan</button></aside>
+<div id="main"><div id="top"><button id="menu">☰</button><b id="title">ExBotz</b></div>
+<div id="msgs"></div>
+<div id="bar"><div id="chips"></div><div id="row">
+<button id="att" title="Lampirkan file">📎</button><input type="file" id="fi" hidden>
+<textarea id="in" rows="1" placeholder="Tulis pesan…"></textarea>
+<button class="pri" id="send">Kirim</button></div></div></div>
+<dialog id="dlg"></dialog>
+<script>
+const $=s=>document.querySelector(s);
+let S=JSON.parse(localStorage.getItem('exb')||'null')||{convs:[],cur:null,cfg:{url:'',token:'',model:''}};
+let busy=null,pending=[];
+const save=()=>localStorage.setItem('exb',JSON.stringify(S));
+const conv=()=>S.convs.find(c=>c.id===S.cur);
+const esc=s=>s.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function api(path,o={}){const c=S.cfg;if(!c.url||!c.token)throw new Error('Isi URL backend & token di Pengaturan');
+ o.headers={...(o.headers||{}),Authorization:'Bearer '+c.token};return fetch(c.url.replace(/\/+$/,'')+path,o)}
+async function jget(p){const r=await api(p);const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||r.status);return j}
+function md(t){const parts=t.split(/```/);return parts.map((p,i)=>{
+ if(i%2){const nl=p.indexOf('\n');return '<pre><code>'+esc(p.slice(nl+1).replace(/\n$/,''))+'</code></pre>'}
+ return esc(p).replace(/`([^`\n]+)`/g,'<code>$1</code>').replace(/\*\*([^*\n]+)\*\*/g,'<b>$1</b>')
+ .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g,'<a href="$2" target="_blank" rel="noopener">$1</a>')
+ .split(/\n{2,}/).map(b=>{b=b.trim();if(!b)return'';
+  const h=/^(#{1,4})\s+(.*)$/.exec(b);if(h)return`<h${h[1].length+1}>${h[2]}</h${h[1].length+1}>`;
+  if(/^([-*]|\d+\.)\s/.test(b)){const o=/^\d/.test(b);return(o?'<ol>':'<ul>')+b.split('\n').map(l=>'<li>'+l.replace(/^([-*]|\d+\.)\s+/,'')+'</li>').join('')+(o?'</ol>':'</ul>')}
+  return'<p>'+b.replace(/\n/g,'<br>')+'</p>'}).join('')}).join('')}
+function render(){
+ $('#list').innerHTML='';S.convs.forEach(c=>{const d=document.createElement('div');d.className='ci'+(c.id===S.cur?' on':'');
+  d.innerHTML=`<span>${esc(c.title)}</span><button title="Ubah nama">✎</button><button title="Hapus">🗑</button>`;
+  d.onclick=()=>{S.cur=c.id;save();render();$('#side').classList.remove('open')};
+  const[b1,b2]=d.querySelectorAll('button');
+  b1.onclick=e=>{e.stopPropagation();const n=prompt('Nama baru',c.title);if(n){c.title=n.slice(0,80);save();render()}};
+  b2.onclick=e=>{e.stopPropagation();if(!confirm('Hapus percakapan?'))return;S.convs=S.convs.filter(x=>x!==c);
+   if(S.cur===c.id)S.cur=S.convs[0]?.id||null;save();if(S.cfg.url)api('/api/files/'+c.id,{method:'DELETE'}).catch(()=>{});render()};
+  $('#list').append(d)});
+ const c=conv();$('#title').textContent=c?c.title:'ExBotz';const box=$('#msgs');box.innerHTML='';
+ if(!c||!c.messages.length)box.innerHTML='<div style="margin:auto;text-align:center;color:var(--m)"><h1 style="color:var(--t)">ExBotz</h1>Tanyakan apa saja, atau minta saya membuat file & project.</div>';
+ (c?.messages||[]).forEach((m,i)=>{const d=document.createElement('div');d.className='m '+m.role;
+  if(m.role==='user')d.textContent=m.content;else d.innerHTML=m.content?md(m.content):(busy&&i===c.messages.length-1?'<span class="dots"><span></span><span></span><span></span></span>':'');
+  (m.files||[]).forEach(f=>{const x=document.createElement('span');x.className='fc';x.innerHTML='📄 '+esc(f.path);
+   if(f.previewable){const b=document.createElement('button');b.textContent='Lihat';b.onclick=()=>preview(f.path);x.append(b)}
+   const b2=document.createElement('button');b2.textContent='Unduh';b2.onclick=()=>dl(f.path);x.append(b2);d.append(x)});
+  if(m.pend){const x=document.createElement('div');x.style.color='var(--m)';x.textContent='⏳ Membuat '+m.pend+'…';d.append(x)}
+  const a=document.createElement('div');a.className='acts';
+  const cp=document.createElement('button');cp.textContent='Salin';cp.onclick=()=>{navigator.clipboard.writeText(m.content);cp.textContent='Tersalin'};a.append(cp);
+  if(!busy&&m.role==='user'){const e=document.createElement('button');e.textContent='Edit';e.onclick=()=>edit(i);a.append(e)}
+  if(!busy&&m.role==='assistant'&&i===c.messages.length-1){const r=document.createElement('button');r.textContent='Ulangi';r.onclick=()=>{c.messages.pop();run()};a.append(r)}
+  if(m.content)d.append(a);box.append(d)});
+ box.scrollTop=box.scrollHeight;$('#send').textContent=busy?'Stop':'Kirim';
+ $('#chips').innerHTML='';pending.forEach(p=>{const s=document.createElement('span');s.className='fc';s.textContent='📎 '+p.name+' ✕';
+  s.onclick=()=>{pending=pending.filter(x=>x!==p);render()};$('#chips').append(s)})}
+function newConv(){const c={id:crypto.randomUUID(),title:'Chat baru',messages:[]};S.convs.unshift(c);S.cur=c.id;save();render()}
+function edit(i){const c=conv(),n=prompt('Edit pesan',c.messages[i].content);if(!n)return;c.messages=c.messages.slice(0,i);c.messages.push({role:'user',content:n});run()}
+async function run(){const c=conv();const am={role:'assistant',content:'',files:[]};c.messages.push(am);
+ if(c.messages.length<=2&&c.title==='Chat baru')c.title=c.messages[0].content.slice(0,40)||'Chat baru';
+ busy=new AbortController();render();
+ try{const r=await api('/api/chat',{method:'POST',signal:busy.signal,headers:{'Content-Type':'application/json'},
+  body:JSON.stringify({conversationId:c.id,model:S.cfg.model||undefined,messages:c.messages.slice(0,-1).map(m=>({role:m.role,content:m.content,attachmentIds:m.att}))})});
+  if(!r.ok){const j=await r.json().catch(()=>({}));throw new Error(j.error||'Error '+r.status)}
+  const rd=r.body.getReader(),dec=new TextDecoder();let buf='';
+  for(;;){const{done,value}=await rd.read();if(done)break;buf+=dec.decode(value,{stream:true});
+   let k;while((k=buf.indexOf('\n\n'))!==-1){const blk=buf.slice(0,k);buf=buf.slice(k+2);
+    const ev=/^event: (.+)$/m.exec(blk)?.[1],dt=/^data: (.+)$/m.exec(blk)?.[1];if(!ev||!dt)continue;const d=JSON.parse(dt);
+    if(ev==='delta')am.content+=d.text;else if(ev==='file_start')am.pend=d.path;
+    else if(ev==='file'){am.pend=null;const i=am.files.findIndex(f=>f.path===d.file.path);if(i<0)am.files.push(d.file);else am.files[i]=d.file}
+    else if(ev==='file_error'){am.pend=null;am.content+=`\n\n⚠️ ${d.path}: ${d.message}`}
+    else if(ev==='error')am.content+=`\n\n⚠️ ${d.message}`;render()}}
+ }catch(e){if(e.name!=='AbortError')am.content+=`\n\n⚠️ ${e.message}`}
+ am.pend=null;busy=null;save();render()}
+$('#send').onclick=()=>{if(busy){busy.abort();return}const t=$('#in').value.trim();if(!t&&!pending.length)return;
+ if(!conv())newConv();conv().messages.push({role:'user',content:t,att:pending.map(p=>p.id)});pending=[];$('#in').value='';$('#in').style.height='auto';run()};
+$('#in').oninput=e=>{e.target.style.height='auto';e.target.style.height=e.target.scrollHeight+'px'};
+$('#in').onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey&&innerWidth>760){e.preventDefault();$('#send').click()}};
+$('#new').onclick=()=>{newConv();$('#side').classList.remove('open')};$('#menu').onclick=()=>$('#side').classList.toggle('open');
+$('#att').onclick=()=>$('#fi').click();
+$('#fi').onchange=async e=>{const f=e.target.files[0];e.target.value='';if(!f)return;if(!conv())newConv();
+ const fd=new FormData();fd.append('conversationId',conv().id);fd.append('file',f);
+ try{const r=await api('/api/upload',{method:'POST',body:fd});const j=await r.json();if(!r.ok)throw new Error(j.error);pending.push({id:j.id,name:j.name});render()}catch(x){alert(x.message)}};
+function modal(h){const d=$('#dlg');d.innerHTML=h+'<p style="text-align:right"><button onclick="this.closest(\'dialog\').close()">Tutup</button></p>';d.showModal();return d}
+async function preview(p){try{const j=await jget(`/api/files/${S.cur}/preview?path=${encodeURIComponent(p)}`);
+ modal(`<b>${esc(p)}</b><pre>${esc(j.content)}</pre>`)}catch(e){alert(e.message)}}
+async function dl(p){try{const r=await api(`/api/files/${S.cur}/download?path=${encodeURIComponent(p)}`);if(!r.ok)throw new Error('Gagal mengunduh');
+ const u=URL.createObjectURL(await r.blob()),a=document.createElement('a');a.href=u;a.download=p.split('/').pop();a.click();setTimeout(()=>URL.revokeObjectURL(u),5000)}catch(e){alert(e.message)}}
+$('#files').onclick=async()=>{if(!S.cur)return alert('Belum ada percakapan');
+ try{const{files}=await jget('/api/files/'+S.cur);const d=modal('<b>File percakapan</b><div id="fl"></div><p><button id="zb">📦 Kemas semua jadi ZIP</button></p>');
+  const fl=d.querySelector('#fl');if(!files.length)fl.textContent='Belum ada file.';
+  files.forEach(f=>{const x=document.createElement('div');x.className='fc';x.style.display='flex';x.innerHTML=`<span style="flex:1">${esc(f.path)} <small>${f.size} B</small></span>`;
+   if(f.previewable){const b=document.createElement('button');b.textContent='Lihat';b.onclick=()=>preview(f.path);x.append(b)}
+   const b2=document.createElement('button');b2.textContent='Unduh';b2.onclick=()=>dl(f.path);x.append(b2);fl.append(x)});
+  d.querySelector('#zb').onclick=async()=>{try{const r=await api(`/api/files/${S.cur}/zip`,{method:'POST',headers:{'Content-Type':'application/json'},body:'{"name":"project.zip"}'});
+   const j=await r.json();if(!r.ok)throw new Error(j.error);dl(j.file.path)}catch(e){alert(e.message)}}
+ }catch(e){alert(e.message)}};
+$('#set').onclick=async()=>{const c=S.cfg;const d=modal(`<b>Pengaturan</b><label>URL backend (HTTPS)</label><input id="u" value="${esc(c.url)}" placeholder="https://exbotz.contoh.com">
+ <label>Token aplikasi (APP_TOKEN)</label><input id="k" type="password" value="${esc(c.token)}"><label>Model / Combo</label><select id="mo"><option value="">(default backend)</option></select>
+ <p><button class="pri" id="sv">Simpan</button></p>`);
+ const sel=d.querySelector('#mo');if(c.model)sel.add(new Option(c.model,c.model,true,true));
+ try{const j=await jget('/api/models');sel.innerHTML='<option value="">(default backend)</option>';j.models.forEach(m=>sel.add(new Option((m.isCombo?'★ ':'')+m.id,m.id)));sel.value=c.model}catch{}
+ d.querySelector('#sv').onclick=()=>{S.cfg={url:d.querySelector('#u').value.trim(),token:d.querySelector('#k').value.trim(),model:sel.value};save();d.close()}};
+if('serviceWorker'in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
+if(!S.convs.length)newConv();else render();
+if(!S.cfg.url)$('#set').click();
+</script></body></html>
